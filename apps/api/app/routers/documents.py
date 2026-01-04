@@ -1,12 +1,15 @@
 """Document management endpoints."""
 
+import os
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Annotated
 from uuid import UUID
 
+import google.generativeai as genai
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.deps import AnalystUser, AuthenticatedUser
@@ -14,6 +17,7 @@ from app.db.session import get_db
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.project import Project
 from app.services.documents import storage, extractor
+from app.services.documents import analysis as analysis_service
 
 router = APIRouter(tags=["documents"])
 
@@ -315,12 +319,6 @@ def delete_document(
 
 
 # ============ Internal Analysis ============
-
-from enum import Enum
-from pydantic import Field
-from app.services.documents import analysis as analysis_service
-import os
-import google.generativeai as genai
 
 
 class AnalysisScope(str, Enum):
