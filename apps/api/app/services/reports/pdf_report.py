@@ -150,7 +150,7 @@ def draw_cover(story: list, styles: dict, run: QueryRun, project: Project) -> No
 
     # Full query text (no truncation)
     story.append(Paragraph(f"<b>Project:</b> {escape_html(project.name)}", styles["Body"]))
-    story.append(Paragraph(f"<b>Research Query:</b>", styles["Body"]))
+    story.append(Paragraph("<b>Research Query:</b>", styles["Body"]))
     story.append(Paragraph(escape_html(run.query_text), styles["Body"]))
     story.append(Spacer(1, 0.3 * inch))
 
@@ -415,7 +415,7 @@ def draw_detailed_evidence(story: list, styles: dict, evidence_rows: list) -> No
         story.append(Spacer(1, 0.1 * inch))
 
     if len(evidence_rows) > 10:
-        story.append(Paragraph(f"<i>... and more evidence in full report.</i>", styles["Small"]))
+        story.append(Paragraph("<i>... and more evidence in full report.</i>", styles["Small"]))
 
     story.append(Spacer(1, 0.2 * inch))
 
