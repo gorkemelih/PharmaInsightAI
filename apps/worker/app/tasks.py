@@ -805,6 +805,27 @@ def quick_synthesis_direct(self, run_id: str) -> dict:
         run_summary.summary_json = synthesis_result
         run_summary.status = "DONE"
         run_summary.updated_at = datetime.now(timezone.utc)
+        
+        # Extract paper_snippets and update EvidenceRows
+        paper_snippets = synthesis_result.get("paper_snippets", [])
+        if paper_snippets:
+            for ps in paper_snippets:
+                paper_id_str = ps.get("paper_id")
+                snippets = ps.get("snippets", [])
+                if paper_id_str and snippets:
+                    try:
+                        evidence_row = db.query(EvidenceRow).filter(
+                            EvidenceRow.run_id == UUID(run_id),
+                            EvidenceRow.paper_id == UUID(paper_id_str)
+                        ).first()
+                        if evidence_row and evidence_row.row_json:
+                            evidence_row.row_json["evidence_snippets"] = snippets
+                            # Also populate key_findings if empty
+                            if not evidence_row.row_json.get("key_findings"):
+                                evidence_row.row_json["key_findings"] = [s.get("quote", "") for s in snippets if s.get("quote")]
+                    except Exception as e:
+                        logger.warning("snippet_update_failed", paper_id=paper_id_str, error=str(e))
+        
         db.commit()
 
         logger.info(
@@ -812,6 +833,7 @@ def quick_synthesis_direct(self, run_id: str) -> dict:
             run_id=run_id,
             papers=len(papers),
             consensus=synthesis_result.get("consensus_level"),
+            snippets_count=len(paper_snippets),
         )
 
         return {

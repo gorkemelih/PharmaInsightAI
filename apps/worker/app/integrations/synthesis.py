@@ -19,9 +19,10 @@ EVIDENCE FROM {paper_count} PAPERS:
 
 INSTRUCTIONS:
 1. Synthesize the findings across all papers
-2. Identify consensus, contradictions, and gaps
-3. Generate evidence-based claims with citations
-4. Every key_point and claim MUST reference at least one paper_id
+2. For each paper, extract 1-2 DIRECT QUOTES that support key findings
+3. Identify consensus, contradictions, and gaps
+4. Generate evidence-based claims with citations
+5. Every key_point and claim MUST reference at least one paper_id
 
 OUTPUT FORMAT:
 You MUST respond with valid JSON only, no markdown, no explanation:
@@ -43,12 +44,22 @@ You MUST respond with valid JSON only, no markdown, no explanation:
       "rationale": "Why this claim is/isn't supported",
       "citations": [{{"paper_id": "...", "pmid": "...", "doi": "..."}}]
     }}
+  ],
+  "paper_snippets": [
+    {{
+      "paper_id": "uuid-of-paper",
+      "snippets": [
+        {{"quote": "Exact text from abstract/content", "section": "abstract|results|conclusion"}}
+      ]
+    }}
   ]
 }}
 
 CRITICAL RULES:
 - Every key_point MUST have at least 1 citation with paper_id
 - Every claim MUST have at least 1 citation with paper_id
+- paper_snippets MUST contain direct quotes from the paper's abstract/content
+- Quotes must be EXACT substrings, not paraphrased
 - Set allowed=false if evidence is insufficient
 - Respond with ONLY valid JSON, no other text"""
 
