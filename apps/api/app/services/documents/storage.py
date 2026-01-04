@@ -41,17 +41,17 @@ def validate_magic_bytes(filename: str, content: bytes) -> bool:
     """
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     expected_magic = MAGIC_BYTES.get(ext)
-    
+
     if expected_magic is None:
         # No magic byte validation for text-based formats
         return True
-    
+
     if not content.startswith(expected_magic):
         raise ValueError(
             f"File content does not match expected format for .{ext} files. "
             "The file may be corrupted or misnamed."
         )
-    
+
     return True
 
 
@@ -73,7 +73,7 @@ def validate_path_within_upload_dir(path: Path) -> bool:
         # Resolve to absolute path (follows symlinks, resolves ..)
         resolved_path = path.resolve()
         upload_dir_resolved = UPLOAD_DIR.resolve()
-        
+
         # Check if the resolved path is under upload dir
         resolved_path.relative_to(upload_dir_resolved)
         return True
@@ -107,24 +107,24 @@ def save_file(
     """
     # Validate magic bytes for known file types
     validate_magic_bytes(filename, file_content)
-    
+
     # Get tenant-isolated directory
     doc_dir = get_document_dir(tenant_id, project_id, document_id)
-    
+
     # Validate path is within upload directory
     validate_path_within_upload_dir(doc_dir)
-    
+
     doc_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Sanitize filename to prevent path traversal
     safe_filename = sanitize_filename(filename)
     file_path = doc_dir / safe_filename
-    
+
     # Final validation before write
     validate_path_within_upload_dir(file_path)
-    
+
     file_path.write_bytes(file_content)
-    
+
     return str(file_path)
 
 
@@ -161,9 +161,9 @@ def delete_file(storage_path: str) -> None:
 def delete_document_dir(tenant_id: UUID, project_id: UUID, document_id: UUID) -> None:
     """Delete entire document directory."""
     doc_dir = get_document_dir(tenant_id, project_id, document_id)
-    
+
     # Validate before deletion
     validate_path_within_upload_dir(doc_dir)
-    
+
     if doc_dir.exists():
         shutil.rmtree(doc_dir)

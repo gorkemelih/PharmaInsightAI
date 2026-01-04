@@ -26,7 +26,7 @@ def retrieve_internal_chunks(
     """
     # Get keywords from question
     keywords = [w.strip() for w in question.lower().split() if len(w.strip()) > 3]
-    
+
     if not keywords:
         # Fall back to all chunks
         chunks = (
@@ -47,7 +47,7 @@ def retrieve_internal_chunks(
         keyword_filters = [
             DocumentChunk.text.ilike(f"%{kw}%") for kw in keywords[:5]  # Limit to 5 keywords
         ]
-        
+
         chunks = (
             db.query(DocumentChunk)
             .join(Document)
@@ -61,7 +61,7 @@ def retrieve_internal_chunks(
             .limit(max_sources)
             .all()
         )
-    
+
     results = []
     for chunk in chunks:
         results.append({
@@ -72,7 +72,7 @@ def retrieve_internal_chunks(
             "page_number": chunk.page_number,
             "text": chunk.text,
         })
-    
+
     return results
 
 
@@ -101,16 +101,16 @@ def retrieve_literature_context(
         .limit(max_sources)
         .all()
     )
-    
+
     results = []
     for ps in summaries:
         paper = ps.paper
         summary_json = ps.summary_json or {}
-        
+
         # Extract key info
         key_findings = summary_json.get("key_findings", [])
         finding_text = " ".join(key_findings[:3]) if key_findings else ""
-        
+
         results.append({
             "type": "literature",
             "paper_id": str(paper.id),
@@ -121,7 +121,7 @@ def retrieve_literature_context(
             "year": paper.year,
             "text": finding_text or paper.abstract[:500] if paper.abstract else "",
         })
-    
+
     return results
 
 
@@ -131,7 +131,7 @@ def build_grounded_prompt(
     literature_chunks: list[dict],
 ) -> str:
     """Build a prompt for grounded synthesis with citations."""
-    
+
     prompt = f"""You are an expert research analyst. Answer the following question based ONLY on the provided context.
 Every claim must be cited using [I1], [I2] for internal docs or [L1], [L2] for literature.
 If information is not in the context, say "No relevant information found."
@@ -139,18 +139,18 @@ If information is not in the context, say "No relevant information found."
 QUESTION: {question}
 
 """
-    
+
     if internal_chunks:
         prompt += "=== INTERNAL DOCUMENTS ===\n"
         for i, chunk in enumerate(internal_chunks, 1):
             prompt += f"[I{i}] (File: {chunk['filename']}, Page: {chunk.get('page_number', 'N/A')})\n{chunk['text'][:500]}\n\n"
-    
+
     if literature_chunks:
         prompt += "=== LITERATURE ===\n"
         for i, chunk in enumerate(literature_chunks, 1):
             authors = ", ".join(chunk.get('authors', [])[:2])
             prompt += f"[L{i}] ({authors}, {chunk.get('year', 'N/A')}. {chunk['title'][:100]})\n{chunk['text'][:500]}\n\n"
-    
+
     prompt += """
 === INSTRUCTIONS ===
 1. Answer the question comprehensively using ONLY the provided context
@@ -159,7 +159,7 @@ QUESTION: {question}
 4. Format in clear markdown
 
 ANSWER:"""
-    
+
     return prompt
 
 
@@ -169,7 +169,7 @@ def format_citations(
 ) -> list[dict]:
     """Format citations for the response."""
     citations = []
-    
+
     for i, chunk in enumerate(internal_chunks, 1):
         citations.append({
             "key": f"I{i}",
@@ -179,7 +179,7 @@ def format_citations(
             "filename": chunk["filename"],
             "page_number": chunk.get("page_number"),
         })
-    
+
     for i, chunk in enumerate(literature_chunks, 1):
         citations.append({
             "key": f"L{i}",
@@ -189,5 +189,5 @@ def format_citations(
             "doi": chunk.get("doi"),
             "title": chunk["title"],
         })
-    
+
     return citations

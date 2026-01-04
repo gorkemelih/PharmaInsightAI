@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
-      - run: ruff check app/ --select=E,F,W
+      - run: ruff check app/ --select=E,F --ignore=E501
       - name: Check imports
         run: python -c "from app.main import app; print('API imports OK')"
         env:

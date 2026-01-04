@@ -94,28 +94,28 @@ async def upload_document(
     """Upload a document to a project."""
     # Verify project
     project = get_project_or_404(project_id, current_user.tenant_id, db)
-    
+
     # Validate file
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Filename is required",
         )
-    
+
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
         )
-    
+
     # Validate MIME type
     if file.content_type and file.content_type not in ALLOWED_MIMES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"MIME type not allowed: {file.content_type}",
         )
-    
+
     # Read file content
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
@@ -123,7 +123,7 @@ async def upload_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)} MB",
         )
-    
+
     # Create document record
     document = Document(
         project_id=project.id,
@@ -137,7 +137,7 @@ async def upload_document(
     )
     db.add(document)
     db.flush()  # Get the ID
-    
+
     # Save file to disk
     try:
         storage_path = storage.save_file(
@@ -156,7 +156,7 @@ async def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save file: {str(e)}",
         )
-    
+
     return DocumentUploadResponse(
         id=str(document.id),
         filename=document.filename,
@@ -173,12 +173,12 @@ def list_documents(
 ) -> list[DocumentResponse]:
     """List all documents in a project."""
     project = get_project_or_404(project_id, current_user.tenant_id, db)
-    
+
     documents = db.query(Document).filter(
         Document.project_id == project.id,
         Document.deleted_at.is_(None),
     ).order_by(Document.created_at.desc()).all()
-    
+
     result = []
     for doc in documents:
         chunk_count = db.query(DocumentChunk).filter(
@@ -195,7 +195,7 @@ def list_documents(
             created_at=doc.created_at.isoformat(),
             chunk_count=chunk_count,
         ))
-    
+
     return result
 
 
@@ -207,7 +207,7 @@ def download_document(
 ) -> Response:
     """Download a document file."""
     document = get_document_or_404(document_id, current_user.tenant_id, db)
-    
+
     try:
         content = storage.read_file(document.storage_path)
     except FileNotFoundError:
@@ -215,7 +215,7 @@ def download_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found on disk",
         )
-    
+
     return Response(
         content=content,
         media_type=document.content_type,
@@ -233,33 +233,33 @@ def process_document(
 ) -> DocumentResponse:
     """Process a document: extract text and create chunks."""
     document = get_document_or_404(document_id, current_user.tenant_id, db)
-    
+
     if document.status == DocumentStatus.PROCESSED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Document already processed",
         )
-    
+
     # Update status
     document.status = DocumentStatus.PROCESSING.value
     db.commit()
-    
+
     try:
         # Read file
         content = storage.read_file(document.storage_path)
-        
+
         # Extract text
         pages = extractor.extract_text(document.filename, content)
-        
+
         if not pages:
             raise ValueError("No text extracted from document")
-        
+
         # Delete existing chunks (if re-processing)
         db.query(DocumentChunk).filter(DocumentChunk.document_id == document.id).delete()
-        
+
         # Create chunks
         chunks = extractor.process_document_text(pages)
-        
+
         for chunk_data in chunks:
             chunk = DocumentChunk(
                 document_id=document.id,
@@ -268,12 +268,12 @@ def process_document(
                 page_number=chunk_data["page_number"],
             )
             db.add(chunk)
-        
+
         document.status = DocumentStatus.PROCESSED.value
         document.error_message = None
         db.commit()
         db.refresh(document)
-        
+
     except Exception as e:
         document.status = DocumentStatus.FAILED.value
         document.error_message = str(e)
@@ -282,11 +282,11 @@ def process_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Processing failed: {str(e)}",
         )
-    
+
     chunk_count = db.query(DocumentChunk).filter(
         DocumentChunk.document_id == document.id
     ).count()
-    
+
     return DocumentResponse(
         id=str(document.id),
         project_id=str(document.project_id),
@@ -308,7 +308,7 @@ def delete_document(
 ) -> None:
     """Soft-delete a document."""
     document = get_document_or_404(document_id, current_user.tenant_id, db)
-    
+
     document.deleted_at = datetime.now(timezone.utc)
     document.deleted_by = current_user.user_id
     db.commit()
@@ -372,11 +372,11 @@ def run_internal_analysis(
     and generates a response using Gemini.
     """
     project = get_project_or_404(project_id, current_user.tenant_id, db)
-    
+
     # Retrieve context based on scope
     internal_chunks: list = []
     literature_chunks: list = []
-    
+
     if request.scope in (AnalysisScope.INTERNAL_ONLY, AnalysisScope.HYBRID):
         internal_chunks = analysis_service.retrieve_internal_chunks(
             project_id=project.id,
@@ -385,7 +385,7 @@ def run_internal_analysis(
             db=db,
             max_sources=request.max_sources_internal,
         )
-    
+
     if request.scope in (AnalysisScope.LITERATURE_ONLY, AnalysisScope.HYBRID):
         literature_chunks = analysis_service.retrieve_literature_context(
             project_id=project.id,
@@ -394,7 +394,7 @@ def run_internal_analysis(
             db=db,
             max_sources=request.max_sources_literature,
         )
-    
+
     # Check if we have any context
     warning = None
     if not internal_chunks and not literature_chunks:
@@ -404,14 +404,14 @@ def run_internal_analysis(
             citations=[],
             warning=warning,
         )
-    
+
     # Build grounded prompt
     prompt = analysis_service.build_grounded_prompt(
         question=request.question,
         internal_chunks=internal_chunks,
         literature_chunks=literature_chunks,
     )
-    
+
     # Call LLM
     try:
         api_key = os.getenv("GOOGLE_API_KEY")
@@ -426,19 +426,19 @@ def run_internal_analysis(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"LLM generation failed: {str(e)}",
         )
-    
+
     # Format citations
     citations_data = analysis_service.format_citations(
         internal_chunks=internal_chunks,
         literature_chunks=literature_chunks,
     )
     citations = [Citation(**c) for c in citations_data]
-    
+
     # Add warning if citations not used properly
     if "[I" not in response_text and "[L" not in response_text:
         if not warning:
             warning = "Response may not include proper citations."
-    
+
     return InternalAnalysisResponse(
         markdown_report=response_text,
         citations=citations,

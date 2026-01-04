@@ -19,15 +19,15 @@ def extract_text_from_pdf(file_content: bytes) -> list[tuple[int, str]]:
     """
     if not HAS_PDFPLUMBER:
         raise RuntimeError("pdfplumber not installed. Install with: pip install pdfplumber")
-    
+
     pages: list[tuple[int, str]] = []
-    
+
     with pdfplumber.open(io.BytesIO(file_content)) as pdf:
         for i, page in enumerate(pdf.pages, 1):
             text = page.extract_text() or ""
             if text.strip():
                 pages.append((i, text))
-    
+
     return pages
 
 
@@ -48,13 +48,13 @@ def extract_text_from_csv(file_content: bytes) -> list[tuple[int, str]]:
     """
     text = file_content.decode("utf-8", errors="ignore")
     reader = csv.reader(io.StringIO(text))
-    
+
     rows: list[tuple[int, str]] = []
     for i, row in enumerate(reader, 1):
         row_text = " | ".join(row)
         if row_text.strip():
             rows.append((i, row_text))
-    
+
     return rows
 
 
@@ -64,7 +64,7 @@ def extract_text(filename: str, file_content: bytes) -> list[tuple[int, str]]:
     Returns list of (page/row_number, text) tuples.
     """
     ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    
+
     if ext == "pdf":
         return extract_text_from_pdf(file_content)
     elif ext in ("txt", "md", "markdown"):
@@ -96,18 +96,18 @@ def chunk_text(
     """
     if not text:
         return
-    
+
     # Clean text
     text = " ".join(text.split())
-    
+
     if len(text) <= chunk_size:
         yield text
         return
-    
+
     start = 0
     while start < len(text):
         end = start + chunk_size
-        
+
         # Try to break at sentence boundary
         if end < len(text):
             # Look for sentence ending
@@ -115,11 +115,11 @@ def chunk_text(
                 if end - i < len(text) and text[end - i] in ".!?":
                     end = end - i + 1
                     break
-        
+
         chunk = text[start:end].strip()
         if chunk:
             yield chunk
-        
+
         # Move start with overlap
         start = end - overlap
         if start < 0:
@@ -140,7 +140,7 @@ def process_document_text(
     """
     chunks: list[dict] = []
     chunk_idx = 0
-    
+
     for page_num, page_text in pages:
         for chunk_str in chunk_text(page_text, chunk_size, overlap):
             chunks.append({
@@ -149,5 +149,5 @@ def process_document_text(
                 "page_number": page_num,
             })
             chunk_idx += 1
-    
+
     return chunks

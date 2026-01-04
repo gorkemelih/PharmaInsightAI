@@ -21,7 +21,7 @@ router = APIRouter(tags=["paper-summaries"])
 
 class PaperSummaryResponse(BaseModel):
     """Response for paper summary."""
-    
+
     id: str
     paper_id: str
     run_id: str
@@ -42,7 +42,7 @@ def generate_paper_summary(
     db: Annotated[Session, Depends(get_db)],
 ) -> PaperSummaryResponse:
     """Generate or return cached summary for a paper in a run."""
-    
+
     # Verify run exists and user has access
     run = db.query(QueryRun).filter(QueryRun.id == run_id).first()
     if not run:
@@ -50,7 +50,7 @@ def generate_paper_summary(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
+
     # Verify tenant ownership via project
     project = (
         db.query(Project)
@@ -62,7 +62,7 @@ def generate_paper_summary(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
+
     # Check if paper exists
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
     if not paper:
@@ -70,7 +70,7 @@ def generate_paper_summary(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Paper not found",
         )
-    
+
     # Check for existing summary (cache hit)
     existing = (
         db.query(PaperSummary)
@@ -80,7 +80,7 @@ def generate_paper_summary(
         )
         .first()
     )
-    
+
     if existing and existing.status == SummaryStatus.DONE and existing.summary_json:
         # Return cached summary
         return PaperSummaryResponse(
@@ -92,7 +92,7 @@ def generate_paper_summary(
             created_at=existing.created_at.isoformat(),
             cached=True,
         )
-    
+
     if existing and existing.status in [SummaryStatus.QUEUED, SummaryStatus.RUNNING]:
         # Already processing
         return PaperSummaryResponse(
@@ -121,10 +121,10 @@ def generate_paper_summary(
             summary_json=None,
         )
         db.add(summary_record)
-    
+
     db.commit()
     db.refresh(summary_record)
-    
+
     # Enqueue Celery task
     try:
         enqueue_summarize_paper(str(run_id), str(paper_id))
@@ -137,7 +137,7 @@ def generate_paper_summary(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to start background process",
         )
-    
+
     return PaperSummaryResponse(
         id=str(summary_record.id),
         paper_id=str(summary_record.paper_id),
@@ -160,7 +160,7 @@ def get_paper_summary(
     db: Annotated[Session, Depends(get_db)],
 ) -> PaperSummaryResponse:
     """Get existing summary for a paper (404 if not yet generated)."""
-    
+
     # Verify run exists and user has access
     run = db.query(QueryRun).filter(QueryRun.id == run_id).first()
     if not run:
@@ -168,7 +168,7 @@ def get_paper_summary(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
+
     # Verify tenant ownership
     project = (
         db.query(Project)
@@ -180,7 +180,7 @@ def get_paper_summary(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
+
     # Get summary
     summary = (
         db.query(PaperSummary)
@@ -190,13 +190,13 @@ def get_paper_summary(
         )
         .first()
     )
-    
+
     if not summary:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Summary not yet generated. Use POST to generate.",
         )
-    
+
     return PaperSummaryResponse(
         id=str(summary.id),
         paper_id=str(summary.paper_id),

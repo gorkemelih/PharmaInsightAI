@@ -41,7 +41,7 @@ def get_dashboard_summary(
 
     # Count unique papers via EvidenceRow (papers analyzed)
     from app.models.evidence_row import EvidenceRow
-    
+
     total_papers = (
         db.query(func.count(func.distinct(EvidenceRow.paper_id)))
         .join(QueryRun, EvidenceRow.run_id == QueryRun.id)

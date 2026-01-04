@@ -55,7 +55,7 @@ def get_project_or_404(
     )
     if not include_deleted:
         query = query.filter(Project.deleted_at.is_(None))
-    
+
     project = query.first()
     if not project:
         raise HTTPException(
@@ -204,7 +204,7 @@ def delete_project(
     project = get_project_or_404(project_id, current_user.tenant_id, db)
 
     now = datetime.now(timezone.utc)
-    
+
     # Soft-delete all runs belonging to this project
     db.query(QueryRun).filter(
         QueryRun.project_id == project_id,
@@ -213,7 +213,7 @@ def delete_project(
         QueryRun.deleted_at: now,
         QueryRun.deleted_by: current_user.user_id,
     })
-    
+
     # Soft-delete the project
     project.deleted_at = now
     project.deleted_by = current_user.user_id
@@ -240,13 +240,13 @@ def restore_project(
     """Restore a soft-deleted project and its runs."""
     # Get project including deleted ones
     project = get_project_or_404(project_id, current_user.tenant_id, db, include_deleted=True)
-    
+
     if project.deleted_at is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Project is not deleted",
         )
-    
+
     # Restore all runs that were deleted at the same time as the project
     db.query(QueryRun).filter(
         QueryRun.project_id == project_id,
@@ -255,7 +255,7 @@ def restore_project(
         QueryRun.deleted_at: None,
         QueryRun.deleted_by: None,
     })
-    
+
     # Restore the project
     project.deleted_at = None
     project.deleted_by = None
