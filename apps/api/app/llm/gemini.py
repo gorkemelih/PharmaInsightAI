@@ -4,7 +4,7 @@ import json
 import structlog
 import google.generativeai as genai
 
-from app.llm.base import LLMProvider, PaperInput, PaperSummarySchema
+from app.llm.base import PaperInput, PaperSummarySchema
 
 logger = structlog.get_logger(__name__)
 

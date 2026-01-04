@@ -1,13 +1,10 @@
 """Internal analysis service for grounded synthesis."""
 
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.models.document import Document, DocumentChunk
-from app.models.paper import Paper
 from app.models.paper_summary import PaperSummary
 from app.models.query_run import QueryRun
 

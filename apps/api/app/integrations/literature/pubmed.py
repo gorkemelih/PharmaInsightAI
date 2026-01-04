@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 import structlog
 
-from app.integrations.literature.base import LiteratureProvider, PaperCandidate
+from app.integrations.literature.base import PaperCandidate
 
 logger = structlog.get_logger(__name__)
 

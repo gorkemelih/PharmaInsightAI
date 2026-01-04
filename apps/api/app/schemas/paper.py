@@ -1,6 +1,6 @@
 """Paper schemas."""
 
-from pydantic import Field, HttpUrl
+from pydantic import Field
 
 from app.schemas.base import BaseReadSchema, BaseSchema
 

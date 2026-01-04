@@ -3,7 +3,6 @@
 import enum
 import uuid
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
