@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 import { getProjects, createProject, deleteProject, Project } from "@/lib/api";
-import { Archive, Loader2 } from "lucide-react";
+import { Trash2, Loader2 } from "lucide-react";
 
 export default function ProjectsPage() {
     const { user, loading } = useAuth();
+    const { t } = useI18n();
     const router = useRouter();
     const [projects, setProjects] = useState<Project[]>([]);
     const [loadingProjects, setLoadingProjects] = useState(true);
@@ -68,7 +70,7 @@ export default function ProjectsPage() {
         e.preventDefault();
         e.stopPropagation();
 
-        if (!confirm(`Are you sure you want to archive "${projectName}"? This will also archive all its runs.`)) {
+        if (!confirm(t.projects.deleteConfirmation.replace("{name}", projectName))) {
             return;
         }
 
@@ -101,13 +103,13 @@ export default function ProjectsPage() {
             <div className="flex flex-col gap-6">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
+                        <h1 className="text-3xl font-bold tracking-tight">{t.projects.title}</h1>
                         <p className="text-muted-foreground">
-                            Manage your research projects
+                            {t.projects.subtitle}
                         </p>
                     </div>
                     {canCreate && (
-                        <Button onClick={() => setShowModal(true)}>New Project</Button>
+                        <Button onClick={() => setShowModal(true)}>{t.projects.newProject}</Button>
                     )}
                 </div>
 
@@ -128,12 +130,12 @@ export default function ProjectsPage() {
                     </div>
                 ) : projects.length === 0 ? (
                     <div className="text-center py-12 rounded-lg border bg-card">
-                        <h3 className="text-lg font-medium mb-2">No projects yet</h3>
+                        <h3 className="text-lg font-medium mb-2">{t.projects.noProjects}</h3>
                         <p className="text-muted-foreground mb-4">
-                            Create your first project to start analyzing literature
+                            {t.projects.createFirst}
                         </p>
                         {canCreate && (
-                            <Button onClick={() => setShowModal(true)}>Create Project</Button>
+                            <Button onClick={() => setShowModal(true)}>{t.projects.newProject}</Button>
                         )}
                     </div>
                 ) : (
@@ -149,7 +151,7 @@ export default function ProjectsPage() {
                                         {project.description || "No description"}
                                     </p>
                                     <p className="text-xs text-muted-foreground mt-4">
-                                        Created {new Date(project.created_at).toLocaleDateString()}
+                                        {t.dashboard.created} {new Date(project.created_at).toLocaleDateString()}
                                     </p>
                                 </Link>
                                 {canArchive && (
@@ -157,12 +159,12 @@ export default function ProjectsPage() {
                                         onClick={(e) => handleArchive(e, project.id, project.name)}
                                         disabled={archiving === project.id}
                                         className="absolute top-4 right-4 p-2 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
-                                        title="Archive project"
+                                        title={t.projects.deleteTooltip}
                                     >
                                         {archiving === project.id ? (
                                             <Loader2 className="h-4 w-4 animate-spin" />
                                         ) : (
-                                            <Archive className="h-4 w-4" />
+                                            <Trash2 className="h-4 w-4" />
                                         )}
                                     </button>
                                 )}
@@ -176,25 +178,25 @@ export default function ProjectsPage() {
             {showModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                     <div className="bg-background rounded-lg p-6 w-full max-w-md shadow-lg">
-                        <h2 className="text-xl font-semibold mb-4">Create Project</h2>
+                        <h2 className="text-xl font-semibold mb-4">{t.projects.createModalTitle}</h2>
                         <form onSubmit={handleCreate} className="space-y-4">
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Name</label>
+                                <label className="text-sm font-medium">{t.projects.name}</label>
                                 <input
                                     type="text"
                                     value={newName}
                                     onChange={(e) => setNewName(e.target.value)}
                                     required
-                                    placeholder="My Research Project"
+                                    placeholder={t.projects.placeholderName}
                                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                                 />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Description (optional)</label>
+                                <label className="text-sm font-medium">{t.projects.description}</label>
                                 <textarea
                                     value={newDescription}
                                     onChange={(e) => setNewDescription(e.target.value)}
-                                    placeholder="Describe the research focus..."
+                                    placeholder={t.projects.placeholderDesc}
                                     rows={3}
                                     className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                                 />
@@ -205,10 +207,17 @@ export default function ProjectsPage() {
                                     variant="outline"
                                     onClick={() => setShowModal(false)}
                                 >
-                                    Cancel
+                                    {t.common.cancel}
                                 </Button>
                                 <Button type="submit" disabled={creating}>
-                                    {creating ? "Creating..." : "Create"}
+                                    {creating ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            {t.common.loading}
+                                        </>
+                                    ) : (
+                                        t.common.create
+                                    )}
                                 </Button>
                             </div>
                         </form>

@@ -35,21 +35,34 @@ def get_dashboard_summary(
 
     # Count projects
     total_projects = db.query(func.count(Project.id)).filter(
-        Project.tenant_id == tenant_id
+        Project.tenant_id == tenant_id,
+        Project.deleted_at.is_(None),
     ).scalar() or 0
 
-    # Count unique papers via paper_summaries (papers analyzed)
+    # Count unique papers via EvidenceRow (papers analyzed)
+    from app.models.evidence_row import EvidenceRow
+    
     total_papers = (
-        db.query(func.count(func.distinct(PaperSummary.paper_id)))
-        .filter(PaperSummary.tenant_id == tenant_id)
+        db.query(func.count(func.distinct(EvidenceRow.paper_id)))
+        .join(QueryRun, EvidenceRow.run_id == QueryRun.id)
+        .join(Project, QueryRun.project_id == Project.id)
+        .filter(
+            Project.tenant_id == tenant_id,
+            Project.deleted_at.is_(None),
+            QueryRun.deleted_at.is_(None),
+        )
         .scalar()
     ) or 0
 
-    # Count runs
+    # Count runs (only for non-deleted projects)
     total_runs = (
         db.query(func.count(QueryRun.id))
         .join(Project, QueryRun.project_id == Project.id)
-        .filter(Project.tenant_id == tenant_id)
+        .filter(
+            Project.tenant_id == tenant_id,
+            Project.deleted_at.is_(None),
+            QueryRun.deleted_at.is_(None),
+        )
         .scalar()
     ) or 0
 
@@ -59,6 +72,8 @@ def get_dashboard_summary(
         .join(Project, QueryRun.project_id == Project.id)
         .filter(
             Project.tenant_id == tenant_id,
+            Project.deleted_at.is_(None),
+            QueryRun.deleted_at.is_(None),
             QueryRun.status.in_([QueryStatus.QUEUED, QueryStatus.RUNNING]),
         )
         .scalar()
@@ -96,7 +111,11 @@ def get_recent_runs(
     runs = (
         db.query(QueryRun, Project.name.label("project_name"))
         .join(Project, QueryRun.project_id == Project.id)
-        .filter(Project.tenant_id == tenant_id)
+        .filter(
+            Project.tenant_id == tenant_id,
+            Project.deleted_at.is_(None),
+            QueryRun.deleted_at.is_(None),
+        )
         .order_by(QueryRun.created_at.desc())
         .limit(limit)
         .all()

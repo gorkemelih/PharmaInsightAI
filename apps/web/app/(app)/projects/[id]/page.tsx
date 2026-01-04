@@ -5,9 +5,10 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
-import { getProject, getProjectRuns, createRun, getDocuments, Project, Run, DocumentItem, AnalysisMode } from "@/lib/api";
+import { getProject, getProjectRuns, createRun, deleteRun, getDocuments, Project, Run, DocumentItem, AnalysisMode } from "@/lib/api";
 import { DocumentsTab } from "@/components/documents-tab";
 import { QueryBuilder } from "@/components/query-builder";
+import { Trash2, Loader2 } from "lucide-react";
 
 type TabType = "runs" | "documents";
 
@@ -33,6 +34,7 @@ export default function ProjectDetailPage() {
     const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("synthesis");
     const [language, setLanguage] = useState<"en" | "tr">("en");
     const [creatingRun, setCreatingRun] = useState(false);
+    const [deletingRun, setDeletingRun] = useState<string | null>(null);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -96,6 +98,25 @@ export default function ProjectDetailPage() {
             setError(err instanceof Error ? err.message : "Failed to create run");
         } finally {
             setCreatingRun(false);
+        }
+    };
+
+    const handleDeleteRun = async (e: React.MouseEvent, runId: string, queryText: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (!confirm(`Are you sure you want to delete this analysis?\n\n"${queryText.substring(0, 50)}..."\n\nThis action cannot be undone.`)) {
+            return;
+        }
+
+        setDeletingRun(runId);
+        try {
+            await deleteRun(runId);
+            setRuns(runs.filter(r => r.id !== runId));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to delete run");
+        } finally {
+            setDeletingRun(null);
         }
     };
 
@@ -312,11 +333,25 @@ export default function ProjectDetailPage() {
                                                     {new Date(run.created_at).toLocaleString()}
                                                 </p>
                                             </div>
-                                            <span
-                                                className={`ml-4 px-2 py-1 rounded text-xs font-medium ${getStatusColor(run.status)}`}
-                                            >
-                                                {run.status}
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <span
+                                                    className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(run.status)}`}
+                                                >
+                                                    {run.status}
+                                                </span>
+                                                <button
+                                                    onClick={(e) => handleDeleteRun(e, run.id, run.query_text)}
+                                                    disabled={deletingRun === run.id}
+                                                    className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                                                    title="Delete run"
+                                                >
+                                                    {deletingRun === run.id ? (
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                    ) : (
+                                                        <Trash2 className="h-4 w-4" />
+                                                    )}
+                                                </button>
+                                            </div>
                                         </Link>
                                     ))}
                                 </div>

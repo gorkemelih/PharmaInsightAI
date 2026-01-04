@@ -73,9 +73,9 @@ export default function DashboardPage() {
         const diffHours = Math.floor(diffMins / 60);
         const diffDays = Math.floor(diffHours / 24);
 
-        if (diffMins < 60) return `${diffMins} min ago`;
-        if (diffHours < 24) return `${diffHours} hrs ago`;
-        if (diffDays < 7) return `${diffDays} days ago`;
+        if (diffMins < 60) return t.time.minsAgo.replace("{n}", diffMins.toString());
+        if (diffHours < 24) return t.time.hoursAgo.replace("{n}", diffHours.toString());
+        if (diffDays < 7) return t.time.daysAgo.replace("{n}", diffDays.toString());
         return date.toLocaleDateString();
     };
 

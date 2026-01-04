@@ -14,8 +14,7 @@ from app.models.project import Project
 from app.models.query_run import QueryRun
 from app.models.paper import Paper
 from app.models.paper_summary import PaperSummary, SummaryStatus
-
-import google.generativeai as genai
+from app.celery_client import enqueue_summarize_paper
 
 router = APIRouter(tags=["paper-summaries"])
 
@@ -30,66 +29,6 @@ class PaperSummaryResponse(BaseModel):
     summary_json: dict[str, Any] | None
     created_at: str
     cached: bool = False
-
-
-def generate_paper_summary_llm(paper: Paper, language: str = "en") -> dict[str, Any]:
-    """Generate summary for a single paper using LLM."""
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GOOGLE_API_KEY not configured")
-    
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash-lite")
-    
-    # Build prompt
-    lang_instruction = "Respond in Turkish (Türkçe)." if language == "tr" else "Respond in English."
-    
-    prompt = f"""Analyze this scientific paper and provide a structured summary.
-
-Title: {paper.title}
-Authors: {', '.join(paper.authors[:5]) if paper.authors else 'Unknown'}
-Year: {paper.year or 'Unknown'}
-Journal: {paper.journal or 'Unknown'}
-Abstract: {paper.abstract or 'No abstract available'}
-
-{lang_instruction}
-
-Provide a JSON response with these fields:
-{{
-  "study_type": "e.g., RCT, meta-analysis, cohort study",
-  "sample_size": "if mentioned",
-  "key_findings": ["finding1", "finding2"],
-  "methodology": "brief description",
-  "limitations": ["limitation1"],
-  "clinical_relevance": "summary of clinical implications",
-  "quality_score": "low/medium/high based on methodology",
-  "pico": {{
-    "population": "...",
-    "intervention": "...",
-    "comparison": "...",
-    "outcome": "..."
-  }}
-}}
-
-Return ONLY valid JSON, no markdown formatting."""
-
-    try:
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        
-        # Clean markdown if present
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-        
-        import json
-        return json.loads(text)
-    except Exception as e:
-        return {
-            "error": str(e),
-            "study_type": "unknown",
-            "key_findings": ["Summary generation failed"],
-        }
 
 
 @router.post(
@@ -154,36 +93,50 @@ def generate_paper_summary(
             cached=True,
         )
     
-    # Generate new summary
-    language = getattr(run, 'language', 'en') or 'en'
-    
-    try:
-        summary_json = generate_paper_summary_llm(paper, language)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Summary generation failed: {str(e)}",
+    if existing and existing.status in [SummaryStatus.QUEUED, SummaryStatus.RUNNING]:
+        # Already processing
+        return PaperSummaryResponse(
+            id=str(existing.id),
+            paper_id=str(existing.paper_id),
+            run_id=str(existing.run_id),
+            status=existing.status.value,
+            summary_json=existing.summary_json,
+            created_at=existing.created_at.isoformat(),
+            cached=False,
         )
-    
-    # Store summary
+
+    # Need to generate (or retry)
     if existing:
-        existing.summary_json = summary_json
-        existing.status = SummaryStatus.DONE
-        db.commit()
-        db.refresh(existing)
         summary_record = existing
+        summary_record.status = SummaryStatus.QUEUED
+        # Clear previous error if any
+        summary_record.error_message = None
     else:
         summary_record = PaperSummary(
             tenant_id=current_user.tenant_id,
             run_id=run_id,
             paper_id=paper_id,
-            model=os.getenv("LLM_MODEL", "gemini-2.0-flash-lite"),
-            status=SummaryStatus.DONE,
-            summary_json=summary_json,
+            model=os.getenv("LLM_MODEL", "gemini-3-flash"),
+            status=SummaryStatus.QUEUED,
+            summary_json=None,
         )
         db.add(summary_record)
+    
+    db.commit()
+    db.refresh(summary_record)
+    
+    # Enqueue Celery task
+    try:
+        enqueue_summarize_paper(str(run_id), str(paper_id))
+    except Exception as e:
+        # If queuing fails, mark as failed
+        summary_record.status = SummaryStatus.FAILED
+        summary_record.error_message = f"Failed to enqueue task: {str(e)}"
         db.commit()
-        db.refresh(summary_record)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to start background process",
+        )
     
     return PaperSummaryResponse(
         id=str(summary_record.id),

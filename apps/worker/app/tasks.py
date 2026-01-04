@@ -148,7 +148,7 @@ def run_pipeline(self, run_id: str) -> dict:
         
         if analysis_mode == "per_paper":
             # Deep Dive mode: summarize top N papers (capped)
-            llm_model = os.getenv("LLM_MODEL", "gemini-2.0-flash-lite")
+            llm_model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
             papers_to_summarize = ingested_paper_ids[:min(deep_dive_cap, MAX_SUMMARIES_PER_RUN)]
             
             logger.info(
@@ -315,7 +315,7 @@ def summarize_paper(self, run_id: str, paper_id: str) -> dict:
 
         provider = GeminiProvider(
             api_key=os.getenv("GOOGLE_API_KEY"),
-            model=os.getenv("LLM_MODEL", "gemini-3-flash"),
+            model=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
         )
 
         summary_data = provider.summarize_paper(
@@ -508,7 +508,7 @@ def synthesize_run(self, run_id: str) -> dict:
         project = db.query(Project).filter(Project.id == run.project_id).first()
         tenant_id = project.tenant_id
 
-        llm_model = os.getenv("LLM_MODEL", "gemini-3-flash")
+        llm_model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 
         # Get or create run summary record
         run_summary = db.query(RunSummary).filter(RunSummary.run_id == UUID(run_id)).first()
@@ -560,6 +560,7 @@ def synthesize_run(self, run_id: str) -> dict:
         synthesis_result = service.synthesize(
             query_text=run.query_text,
             evidence_rows=evidence_data,
+            language=run.language or "en",
         )
 
         # Save result
@@ -659,7 +660,7 @@ def quick_synthesis_direct(self, run_id: str) -> dict:
 
         if not papers:
             # No papers, create empty summary
-            llm_model = os.getenv("LLM_MODEL", "gemini-2.0-flash-lite")
+            llm_model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
             run_summary = RunSummary(
                 tenant_id=tenant_id,
                 run_id=UUID(run_id),
@@ -712,22 +713,34 @@ def quick_synthesis_direct(self, run_id: str) -> dict:
                 oa_count += 1
             
             # Create evidence row from paper metadata
+            # Simple study type inference
+            study_type_lower = (paper.abstract or "").lower()
+            if "meta-analysis" in study_type_lower:
+                inferred_type = "Meta-Analysis"
+            elif "review" in study_type_lower:
+                inferred_type = "Review"
+            elif "clinical trial" in study_type_lower:
+                inferred_type = "Clinical Trial"
+            else:
+                inferred_type = "Article"
+
             row_json = {
                 "paper_id": str(paper.id),
                 "citation": {
-                    "pmid": paper.pmid,
-                    "doi": paper.doi,
                     "title": paper.title,
+                    "authors": paper.authors,
                     "year": paper.year,
                     "journal": paper.journal,
-                    "authors": paper.authors[:3] if paper.authors else [],
+                    "doi": paper.doi,
+                    "pmid": paper.pmid,
                 },
-                "study_type": None,  # Will be inferred by synthesis
-                "population": None,
-                "intervention": None,
+                "study_type": inferred_type,
+                "population": "N/A",
+                "intervention": "N/A",
                 "comparator": None,
                 "outcomes": [],
-                "key_findings": [],  # Will be filled by synthesis
+                # Use abstract snippet as key finding for quick synthesis
+                "key_findings": [paper.abstract[:300] + "..."] if paper.abstract else ["See abstract"],
                 "limitations": [],
                 "abstract": paper.abstract[:2000] if paper.abstract else "",
                 "content": content_text,  # Full-text or abstract
@@ -757,7 +770,7 @@ def quick_synthesis_direct(self, run_id: str) -> dict:
         logger.info("quick_synthesis_evidence_created", run_id=run_id, rows=len(evidence_data))
 
         # Now run synthesis with paper abstracts
-        llm_model = os.getenv("LLM_MODEL", "gemini-2.0-flash-lite")
+        llm_model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
         
         # Get or create run summary
         run_summary = db.query(RunSummary).filter(RunSummary.run_id == UUID(run_id)).first()
@@ -799,6 +812,7 @@ def quick_synthesis_direct(self, run_id: str) -> dict:
         synthesis_result = service.synthesize(
             query_text=run.query_text,
             evidence_rows=evidence_for_synthesis,
+            language=run.language or "en",
         )
 
         # Save result

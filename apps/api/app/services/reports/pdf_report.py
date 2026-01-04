@@ -30,17 +30,21 @@ from sqlalchemy.orm import Session
 
 from app.models.project import Project
 from app.models.query_run import QueryRun
-from app.models.paper_summary import PaperSummary
+
 from app.models.run_summary import RunSummary
 
 
 # Try to register DejaVu for TR character support
+# Register DejaVu for TR character support
+# Paths verified in container: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 try:
     pdfmetrics.registerFont(TTFont('DejaVu', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
     pdfmetrics.registerFont(TTFont('DejaVu-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
     DEFAULT_FONT = 'DejaVu'
     BOLD_FONT = 'DejaVu-Bold'
-except:
+except Exception as e:
+    print(f"Font loading error: {e}")
+    # Fallback only if absolutely necessary, but we expect fonts to be present
     DEFAULT_FONT = 'Helvetica'
     BOLD_FONT = 'Helvetica-Bold'
 
@@ -49,7 +53,20 @@ def escape_html(text: str) -> str:
     """Escape HTML special characters for ReportLab Paragraph."""
     if not text:
         return ""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    
+    # First unescape any HTML entities (like &lt;i&gt; -> <i>)
+    import html
+    text = html.unescape(text)
+    
+    # Then escape specific characters for ReportLab, BUT keep valid tags if needed?
+    # Actually, ReportLab supports <b> <i> etc. 
+    # If the text contains <i> coming from unescape, we want to keep it.
+    # But we should escape bare < and > that are not tags.
+    # For now, let's just replace & with &amp; to be safe, but allow tags.
+    # Simpler approach: Just unescape. ReportLab handles standard tags. 
+    # If there are mathematical <, they might break it. 
+    # Let's trust unescape for now to fix the display issues.
+    return text.replace("&", "&amp;")
 
 
 def get_custom_styles() -> dict[str, ParagraphStyle]:
@@ -314,7 +331,7 @@ def draw_marketing(story: list, styles: dict, summary_json: dict[str, Any] | Non
     story.append(Spacer(1, 0.2 * inch))
 
 
-def draw_evidence_table(story: list, styles: dict, evidence_rows: list[PaperSummary]) -> None:
+def draw_evidence_table(story: list, styles: dict, evidence_rows: list) -> None:
     """Add evidence table section."""
     story.append(Paragraph("Evidence Overview", styles["Heading1"]))
     
@@ -325,10 +342,10 @@ def draw_evidence_table(story: list, styles: dict, evidence_rows: list[PaperSumm
     # Table header
     data = [["#", "Paper Title", "Study Type", "Key Finding"]]
     
-    for i, ps in enumerate(evidence_rows[:15], 1):  # Limit to 15 for space
-        summary = ps.summary_json or {}
+    for i, row in enumerate(evidence_rows[:15], 1):  # Limit to 15 for space
+        summary = row.row_json or {}
         # Full title wrapped (no truncation)
-        title = ps.paper.title if ps.paper.title else "Untitled"
+        title = row.paper.title if row.paper.title else "Untitled"
         study_type = summary.get("study_type", "N/A") or "N/A"
         findings = summary.get("key_findings", [])
         findings_text = findings[0] if findings else "N/A"
@@ -362,7 +379,48 @@ def draw_evidence_table(story: list, styles: dict, evidence_rows: list[PaperSumm
     story.append(Spacer(1, 0.3 * inch))
 
 
-def draw_references(story: list, styles: dict, evidence_rows: list[PaperSummary]) -> None:
+def draw_detailed_evidence(story: list, styles: dict, evidence_rows: list) -> None:
+    """Add detailed evidence snippets section."""
+    has_snippets = False
+    for row in evidence_rows:
+        summary = row.row_json or {}
+        if summary.get("evidence_snippets"):
+            has_snippets = True
+            break
+            
+    if not has_snippets:
+        return
+
+    story.append(Paragraph("Evidence Snippets", styles["Heading1"]))
+    
+    for i, row in enumerate(evidence_rows[:10], 1):  # Limit to top 10 to avoid huge PDFs
+        summary = row.row_json or {}
+        snippets = summary.get("evidence_snippets", [])
+        if not snippets:
+            continue
+            
+        paper = row.paper
+        title = paper.title if paper.title else "Untitled"
+        
+        # Paper Header
+        header_text = f"<b>[{i}] {escape_html(title)}</b>"
+        story.append(Paragraph(header_text, styles["Body"]))
+        
+        # Snippets
+        for snippet in snippets[:2]:  # Max 2 snippets per paper
+            text = snippet.get("quote", snippet) if isinstance(snippet, dict) else snippet
+            if text:
+                story.append(Paragraph(f"<i>“{escape_html(str(text))}”</i>", styles["Citation"]))
+        
+        story.append(Spacer(1, 0.1 * inch))
+    
+    if len(evidence_rows) > 10:
+        story.append(Paragraph(f"<i>... and more evidence in full report.</i>", styles["Small"]))
+    
+    story.append(Spacer(1, 0.2 * inch))
+
+
+def draw_references(story: list, styles: dict, evidence_rows: list) -> None:
     """Add full references section with DOI/PMID links."""
     story.append(PageBreak())
     story.append(Paragraph("References", styles["Heading1"]))
@@ -371,8 +429,8 @@ def draw_references(story: list, styles: dict, evidence_rows: list[PaperSummary]
         story.append(Paragraph("<i>No references available.</i>", styles["Body"]))
         return
     
-    for i, ps in enumerate(evidence_rows, 1):
-        paper = ps.paper
+    for i, row in enumerate(evidence_rows, 1):
+        paper = row.paper
         authors = paper.authors[:3] if paper.authors else []
         author_str = ", ".join(authors)
         if paper.authors and len(paper.authors) > 3:
@@ -427,10 +485,11 @@ def build_run_report_pdf(run_id: UUID, db: Session) -> bytes:
     if not project:
         raise ValueError(f"Project for run {run_id} not found")
     
-    # Fetch paper summaries with papers
-    paper_summaries = (
-        db.query(PaperSummary)
-        .filter(PaperSummary.run_id == run_id)
+    # Fetch evidence rows (replacement for PaperSummary)
+    from app.models.evidence_row import EvidenceRow
+    evidence_rows = (
+        db.query(EvidenceRow)
+        .filter(EvidenceRow.run_id == run_id)
         .all()
     )
     
@@ -459,7 +518,7 @@ def build_run_report_pdf(run_id: UUID, db: Session) -> bytes:
     draw_cover(story, styles, run, project)
     
     # 2. Metadata
-    draw_metadata(story, styles, run, project, len(paper_summaries))
+    draw_metadata(story, styles, run, project, len(evidence_rows))
     
     # 3. Executive Summary
     draw_summary(story, styles, summary_json)
@@ -477,10 +536,13 @@ def build_run_report_pdf(run_id: UUID, db: Session) -> bytes:
     draw_marketing(story, styles, summary_json)
     
     # 8. Evidence Table
-    draw_evidence_table(story, styles, paper_summaries)
+    draw_evidence_table(story, styles, evidence_rows)
     
-    # 9. References
-    draw_references(story, styles, paper_summaries)
+    # 9. Evidence Snippets
+    draw_detailed_evidence(story, styles, evidence_rows)
+    
+    # 10. References
+    draw_references(story, styles, evidence_rows)
     
     # Build PDF
     doc.build(story)

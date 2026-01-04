@@ -54,7 +54,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/pharmainsight
       - REDIS_URL=redis://redis:6379/0
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-gemini-2.0-flash-lite}
+      - LLM_MODEL=${LLM_MODEL:-gemini-2.5-flash}
       - DEEP_DIVE_MAX_PAPER_SUMMARIES=${DEEP_DIVE_MAX_PAPER_SUMMARIES:-10}
     depends_on:
       postgres:

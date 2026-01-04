@@ -1,252 +1,63 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Download, Loader2, Sparkles } from "lucide-react";
-import {
-    getRun,
-    getProject,
-    getRunPapers,
-    getRunSummaries,
-    getPaperSummary,
-    getEvidenceTable,
-    getSummaryWithReferences,
-    getEvidenceDetail,
-    downloadRunReport,
-    generatePaperSummary,
-    Run,
-    Project,
-    Paper,
-    SummaryStatus,
-    Summary,
-    EvidenceRow,
-    SummaryWithReferencesResponse,
-    FormattedReference,
-    EvidenceDetail,
-    OnDemandSummary,
-} from "@/lib/api";
-
-type TabType = "papers" | "summary" | "claims";
+import { FormattedReference } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
+import { useRunDetails, TabType } from "./useRunDetails";
 
 export default function RunDetailPage() {
-    const { user, loading } = useAuth();
-    const router = useRouter();
-    const params = useParams();
-    const runId = params.id as string;
+    const { t } = useI18n();
+    const {
+        // Auth & navigation
+        user,
+        loading,
 
-    const [activeTab, setActiveTab] = useState<TabType>("papers");
-    const [run, setRun] = useState<Run | null>(null);
-    const [project, setProject] = useState<Project | null>(null);
-    const [papers, setPapers] = useState<Paper[]>([]);
-    const [summaries, setSummaries] = useState<SummaryStatus[]>([]);
-    const [evidenceTable, setEvidenceTable] = useState<EvidenceRow[]>([]);
-    const [summaryWithRefs, setSummaryWithRefs] = useState<SummaryWithReferencesResponse | null>(null);
-    const [selectedSummary, setSelectedSummary] = useState<Summary | null>(null);
-    const [showModal, setShowModal] = useState(false);
-    const [loadingData, setLoadingData] = useState(true);
-    const [loadingPapers, setLoadingPapers] = useState(false);
-    const [loadingSummary, setLoadingSummary] = useState(false);
-    const [error, setError] = useState("");
+        // Core data
+        run,
+        project,
+        papers,
+        summaries,
+        summaryWithRefs,
 
-    // Evidence drawer state
-    const [showEvidenceDrawer, setShowEvidenceDrawer] = useState(false);
-    const [evidenceDetail, setEvidenceDetail] = useState<EvidenceDetail | null>(null);
-    const [loadingEvidence, setLoadingEvidence] = useState(false);
+        // Selected/modal data
+        selectedSummary,
+        evidenceDetail,
+        onDemandSummary,
 
-    // PDF download state
-    const [downloadingPdf, setDownloadingPdf] = useState(false);
+        // UI state
+        activeTab,
+        setActiveTab,
+        showModal,
+        setShowModal,
+        showEvidenceDrawer,
+        setShowEvidenceDrawer,
+        showOnDemandModal,
+        setShowOnDemandModal,
 
-    // On-demand summary state
-    const [generatingSummary, setGeneratingSummary] = useState<string | null>(null);
-    const [onDemandSummary, setOnDemandSummary] = useState<OnDemandSummary | null>(null);
-    const [showOnDemandModal, setShowOnDemandModal] = useState(false);
+        // Loading states
+        loadingData,
+        loadingPapers,
+        loadingSummary,
+        loadingEvidence,
+        downloadingPdf,
+        generatingSummary,
 
-    const handleDownloadPdf = async () => {
-        setDownloadingPdf(true);
-        try {
-            await downloadRunReport(runId);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to download PDF");
-        } finally {
-            setDownloadingPdf(false);
-        }
-    };
+        // Error state
+        error,
 
-    const handleGenerateSummary = async (paperId: string) => {
-        setGeneratingSummary(paperId);
-        setError("");
-        try {
-            const summary = await generatePaperSummary(runId, paperId);
-            setOnDemandSummary(summary);
-            setShowOnDemandModal(true);
-            // Refresh summaries list to update status
-            fetchSummaries();
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to generate summary");
-        } finally {
-            setGeneratingSummary(null);
-        }
-    };
+        // Actions
+        handleDownloadPdf,
+        handleGenerateSummary,
+        handleViewSummary,
+        handleCitationClick,
 
-    useEffect(() => {
-        if (!loading && !user) {
-            router.push("/login");
-        }
-    }, [user, loading, router]);
-
-    useEffect(() => {
-        if (user && runId) {
-            fetchData();
-        }
-    }, [user, runId]);
-
-    useEffect(() => {
-        if (run && (run.status === "QUEUED" || run.status === "RUNNING")) {
-            const interval = setInterval(fetchData, 2000);
-            return () => clearInterval(interval);
-        }
-    }, [run?.status]);
-
-    useEffect(() => {
-        if (run?.status === "DONE" && papers.length === 0 && !loadingPapers) {
-            fetchPapers();
-            fetchSummaries();
-            fetchEvidenceTable();
-            fetchSummaryWithRefs();
-        }
-    }, [run?.status]);
-
-    useEffect(() => {
-        if (run?.status === "DONE" && summaries.length > 0) {
-            const processingCount = summaries.filter(
-                (s) => s.status === "QUEUED" || s.status === "RUNNING"
-            ).length;
-            if (processingCount > 0) {
-                const interval = setInterval(() => {
-                    fetchSummaries();
-                    fetchEvidenceTable();
-                    fetchSummaryWithRefs();
-                }, 3000);
-                return () => clearInterval(interval);
-            }
-        }
-    }, [run?.status, summaries]);
-
-    useEffect(() => {
-        if (summaryWithRefs && (summaryWithRefs.status === "QUEUED" || summaryWithRefs.status === "RUNNING")) {
-            const interval = setInterval(fetchSummaryWithRefs, 3000);
-            return () => clearInterval(interval);
-        }
-    }, [summaryWithRefs?.status]);
-
-    const fetchData = async () => {
-        try {
-            const runData = await getRun(runId);
-            setRun(runData);
-            if (!project) {
-                const projectData = await getProject(runData.project_id);
-                setProject(projectData);
-            }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to fetch data");
-        } finally {
-            setLoadingData(false);
-        }
-    };
-
-    const fetchPapers = async () => {
-        setLoadingPapers(true);
-        try {
-            const papersData = await getRunPapers(runId);
-            setPapers(papersData);
-        } catch (err) {
-            console.error("Failed to fetch papers:", err);
-        } finally {
-            setLoadingPapers(false);
-        }
-    };
-
-    const fetchSummaries = async () => {
-        try {
-            const summariesData = await getRunSummaries(runId);
-            setSummaries(summariesData);
-        } catch (err) {
-            console.error("Failed to fetch summaries:", err);
-        }
-    };
-
-    const fetchEvidenceTable = async () => {
-        try {
-            const data = await getEvidenceTable(runId);
-            setEvidenceTable(data);
-        } catch (err) {
-            console.error("Failed to fetch evidence table:", err);
-        }
-    };
-
-    const fetchSummaryWithRefs = async () => {
-        try {
-            const data = await getSummaryWithReferences(runId);
-            setSummaryWithRefs(data);
-        } catch (err) {
-            console.error("Failed to fetch summary with references:", err);
-        }
-    };
-
-    const handleViewSummary = async (paperId: string) => {
-        setLoadingSummary(true);
-        setShowModal(true);
-        try {
-            const summary = await getPaperSummary(paperId, runId);
-            setSelectedSummary(summary);
-        } catch (err) {
-            console.error("Failed to fetch summary:", err);
-        } finally {
-            setLoadingSummary(false);
-        }
-    };
-
-    const handleCitationClick = async (ref: FormattedReference) => {
-        setLoadingEvidence(true);
-        setShowEvidenceDrawer(true);
-        setEvidenceDetail(null);
-        try {
-            const detail = await getEvidenceDetail(runId, ref.paper_id);
-            setEvidenceDetail(detail);
-        } catch (err) {
-            console.error("Failed to fetch evidence:", err);
-        } finally {
-            setLoadingEvidence(false);
-        }
-    };
-
-    const getSummaryStatus = (paperId: string) => {
-        return summaries.find((s) => s.paper_id === paperId);
-    };
-
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case "DONE": return "bg-green-100 text-green-700 border-green-200";
-            case "RUNNING": return "bg-blue-100 text-blue-700 border-blue-200";
-            case "QUEUED": return "bg-yellow-100 text-yellow-700 border-yellow-200";
-            case "FAILED": return "bg-red-100 text-red-700 border-red-200";
-            default: return "bg-gray-100 text-gray-700 border-gray-200";
-        }
-    };
-
-    const getStatusBadge = (status: string) => {
-        const colors: Record<string, string> = {
-            DONE: "bg-green-100 text-green-700",
-            RUNNING: "bg-blue-100 text-blue-700",
-            QUEUED: "bg-yellow-100 text-yellow-700",
-            FAILED: "bg-red-100 text-red-700",
-            PENDING: "bg-gray-100 text-gray-700",
-        };
-        return colors[status] || "bg-gray-100 text-gray-700";
-    };
+        // Helpers
+        getSummaryStatus,
+        getStatusColor,
+        getStatusBadge,
+    } = useRunDetails();
 
     // Citation chip component
     const CitationChip = ({ indices, references }: { indices: { index: number }[]; references: FormattedReference[] }) => {
@@ -287,7 +98,7 @@ export default function RunDetailPage() {
                 <div className="text-center py-12">
                     <h2 className="text-xl font-semibold mb-2">Run not found</h2>
                     <Link href="/projects">
-                        <Button>Back to Projects</Button>
+                        <Button>{t.run.backToProject}</Button>
                     </Link>
                 </div>
             </div>
@@ -300,9 +111,9 @@ export default function RunDetailPage() {
     const doneCount = summaries.filter((s) => s.status === "DONE").length;
 
     const tabs: { id: TabType; label: string; count?: number }[] = [
-        { id: "papers", label: "Papers", count: papers.length },
-        { id: "summary", label: "Run Summary" },
-        { id: "claims", label: "Claims Draft" },
+        { id: "papers", label: t.run.tabs.papers, count: papers.length },
+        { id: "summary", label: t.run.tabs.summary },
+        { id: "claims", label: t.run.tabs.claims },
     ];
 
     return (
@@ -310,7 +121,7 @@ export default function RunDetailPage() {
             <div className="flex flex-col gap-6">
                 {/* Breadcrumb */}
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Link href="/projects" className="hover:text-primary">Projects</Link>
+                    <Link href="/projects" className="hover:text-primary">{t.projects.title}</Link>
                     <span>/</span>
                     {project && (
                         <>
@@ -327,10 +138,10 @@ export default function RunDetailPage() {
                         <div>
                             <h2 className="text-xl font-semibold">{run.status}</h2>
                             <p className="text-sm opacity-80">
-                                {run.status === "QUEUED" && "Waiting in queue..."}
-                                {run.status === "RUNNING" && "Searching literature databases..."}
-                                {run.status === "DONE" && `Found ${papers.length} papers`}
-                                {run.status === "FAILED" && "Analysis failed"}
+                                {run.status === "QUEUED" && t.run.status.waiting}
+                                {run.status === "RUNNING" && t.run.status.searching}
+                                {run.status === "DONE" && t.run.status.found.replace("{n}", papers.length.toString())}
+                                {run.status === "FAILED" && t.run.status.failed}
                             </p>
                         </div>
                         {run.status === "DONE" && (
@@ -341,7 +152,7 @@ export default function RunDetailPage() {
                                 className="bg-white/90 hover:bg-white"
                             >
                                 <Download className={`h-4 w-4 mr-2 ${downloadingPdf ? "animate-pulse" : ""}`} />
-                                {downloadingPdf ? "Generating..." : "Download PDF"}
+                                {downloadingPdf ? t.run.generating : t.run.downloadPdf}
                             </Button>
                         )}
                     </div>
@@ -353,24 +164,24 @@ export default function RunDetailPage() {
 
                 {/* Query */}
                 <div className="rounded-lg border bg-card p-6">
-                    <h3 className="text-sm font-medium text-muted-foreground mb-2">Research Query</h3>
+                    <h3 className="text-sm font-medium text-muted-foreground mb-2">{t.run.query}</h3>
                     <p className="text-lg">{run.query_text}</p>
                 </div>
 
                 {/* Progress */}
                 {run.status === "DONE" && summaries.length > 0 && (
                     <div className="rounded-lg border bg-card p-6">
-                        <h3 className="text-lg font-semibold mb-2">AI Analysis Progress</h3>
+                        <h3 className="text-lg font-semibold mb-2">{t.run.progress.title}</h3>
                         <div className="flex items-center gap-4">
                             <div className="flex-1 bg-muted rounded-full h-2">
                                 <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${(doneCount / summaries.length) * 100}%` }} />
                             </div>
-                            <span className="text-sm text-muted-foreground">{doneCount}/{summaries.length} analyzed</span>
-                            {processingCount > 0 && <span className="text-sm text-blue-600 animate-pulse">Processing...</span>}
+                            <span className="text-sm text-muted-foreground">{t.run.progress.analyzed.replace("{n}", doneCount.toString()).replace("{total}", summaries.length.toString())}</span>
+                            {processingCount > 0 && <span className="text-sm text-blue-600 animate-pulse">{t.run.progress.processing}</span>}
                         </div>
                         {summaryWithRefs && (
                             <div className="mt-2 text-sm">
-                                Run Summary: <span className={`px-2 py-0.5 rounded ${getStatusBadge(summaryWithRefs.status)}`}>{summaryWithRefs.status}</span>
+                                {t.run.tabs.summary}: <span className={`px-2 py-0.5 rounded ${getStatusBadge(summaryWithRefs.status)}`}>{summaryWithRefs.status}</span>
                             </div>
                         )}
                     </div>
@@ -401,21 +212,21 @@ export default function RunDetailPage() {
                 {run.status === "DONE" && activeTab === "papers" && (
                     <div className="rounded-lg border bg-card">
                         <div className="p-6 border-b">
-                            <h3 className="text-lg font-semibold">Papers Found ({papers.length})</h3>
+                            <h3 className="text-lg font-semibold">{t.run.papers.title} ({papers.length})</h3>
                         </div>
                         {loadingPapers ? (
-                            <div className="p-8 text-center text-muted-foreground">Loading...</div>
+                            <div className="p-8 text-center text-muted-foreground">{t.common.loading}</div>
                         ) : papers.length === 0 ? (
-                            <div className="p-8 text-center text-muted-foreground">No papers found.</div>
+                            <div className="p-8 text-center text-muted-foreground">{t.run.papers.noPapers}</div>
                         ) : (
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead className="border-b bg-muted/50">
                                         <tr>
-                                            <th className="px-4 py-3 text-left font-medium">Title</th>
-                                            <th className="px-4 py-3 text-left font-medium w-20">Year</th>
-                                            <th className="px-4 py-3 text-left font-medium w-24">AI Status</th>
-                                            <th className="px-4 py-3 text-right font-medium w-32">Actions</th>
+                                            <th className="px-4 py-3 text-left font-medium">{t.run.papers.table.title}</th>
+                                            <th className="px-4 py-3 text-left font-medium w-20">{t.run.papers.table.year}</th>
+                                            <th className="px-4 py-3 text-left font-medium w-24">{t.run.papers.table.aiStatus}</th>
+                                            <th className="px-4 py-3 text-right font-medium w-32">{t.run.papers.table.actions}</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -441,7 +252,7 @@ export default function RunDetailPage() {
                                                                     onClick={() => handleViewSummary(paper.id)}
                                                                     className="text-primary hover:underline text-xs"
                                                                 >
-                                                                    View Summary
+                                                                    {t.run.papers.viewSummary}
                                                                 </button>
                                                             ) : (
                                                                 <button
@@ -452,12 +263,12 @@ export default function RunDetailPage() {
                                                                     {generatingSummary === paper.id ? (
                                                                         <>
                                                                             <Loader2 className="h-3 w-3 animate-spin" />
-                                                                            Generating...
+                                                                            {t.run.generating}
                                                                         </>
                                                                     ) : (
                                                                         <>
                                                                             <Sparkles className="h-3 w-3" />
-                                                                            Generate Summary
+                                                                            {t.run.papers.generateSummary}
                                                                         </>
                                                                     )}
                                                                 </button>
@@ -496,13 +307,11 @@ export default function RunDetailPage() {
                     </div>
                 )}
 
-                {/* Evidence Table removed - data shown in Papers tab */}
-
                 {/* Summary Tab with References */}
                 {run.status === "DONE" && activeTab === "summary" && (
                     <div className="rounded-lg border bg-card p-6">
                         <h3 className="text-lg font-semibold mb-4">
-                            Run Summary
+                            {t.run.summary.title}
                             {summaryWithRefs && (
                                 <span className={`ml-2 px-2 py-0.5 rounded text-xs ${getStatusBadge(summaryWithRefs.status)}`}>
                                     {summaryWithRefs.status}
@@ -510,20 +319,20 @@ export default function RunDetailPage() {
                             )}
                         </h3>
                         {!summaryWithRefs || summaryWithRefs.status === "PENDING" ? (
-                            <div className="text-muted-foreground">Waiting for paper analysis to complete...</div>
+                            <div className="text-muted-foreground">{t.run.summary.waiting}</div>
                         ) : summaryWithRefs.status === "RUNNING" || summaryWithRefs.status === "QUEUED" ? (
-                            <div className="text-muted-foreground animate-pulse">Synthesizing findings...</div>
+                            <div className="text-muted-foreground animate-pulse">{t.run.progress.synthesizing}</div>
                         ) : summaryWithRefs.status === "FAILED" ? (
-                            <div className="text-red-600">Synthesis failed: {summaryWithRefs.error_message}</div>
+                            <div className="text-red-600">{t.run.summary.failed}: {summaryWithRefs.error_message}</div>
                         ) : summaryWithRefs.summary ? (
                             <div className="space-y-6">
                                 <div>
-                                    <h4 className="font-medium text-muted-foreground mb-2">Executive Summary (TLDR)</h4>
+                                    <h4 className="font-medium text-muted-foreground mb-2">{t.run.summary.tldr}</h4>
                                     <p className="text-sm">{summaryWithRefs.summary.tldr}</p>
                                 </div>
                                 <div>
                                     <h4 className="font-medium text-muted-foreground mb-2">
-                                        Consensus Level: <span className={`px-2 py-0.5 rounded ${summaryWithRefs.summary.consensus_level === "high" ? "bg-green-100 text-green-700" :
+                                        {t.run.summary.consensus}: <span className={`px-2 py-0.5 rounded ${summaryWithRefs.summary.consensus_level === "high" ? "bg-green-100 text-green-700" :
                                             summaryWithRefs.summary.consensus_level === "medium" ? "bg-yellow-100 text-yellow-700" :
                                                 "bg-red-100 text-red-700"
                                             }`}>{summaryWithRefs.summary.consensus_level}</span>
@@ -531,7 +340,7 @@ export default function RunDetailPage() {
                                 </div>
                                 {summaryWithRefs.summary.key_points.length > 0 && (
                                     <div>
-                                        <h4 className="font-medium text-muted-foreground mb-2">Key Points</h4>
+                                        <h4 className="font-medium text-muted-foreground mb-2">{t.run.summary.keyPoints}</h4>
                                         <ul className="space-y-2">
                                             {summaryWithRefs.summary.key_points.map((kp, i) => (
                                                 <li key={i} className="text-sm flex items-start gap-2">
@@ -547,7 +356,7 @@ export default function RunDetailPage() {
                                 )}
                                 {summaryWithRefs.summary.gaps.length > 0 && (
                                     <div>
-                                        <h4 className="font-medium text-muted-foreground mb-2">Research Gaps</h4>
+                                        <h4 className="font-medium text-muted-foreground mb-2">{t.run.summary.gaps}</h4>
                                         <ul className="text-sm space-y-1">
                                             {summaryWithRefs.summary.gaps.map((gap, i) => (
                                                 <li key={i}>• {gap}</li>
@@ -559,7 +368,7 @@ export default function RunDetailPage() {
                                 {/* References Section */}
                                 {summaryWithRefs.references.length > 0 && (
                                     <div className="mt-8 pt-6 border-t">
-                                        <h4 className="font-medium text-muted-foreground mb-3">References</h4>
+                                        <h4 className="font-medium text-muted-foreground mb-3">{t.run.summary.references}</h4>
                                         <ol className="space-y-2 text-sm">
                                             {summaryWithRefs.references.map((ref) => (
                                                 <li key={ref.index} className="flex items-start gap-2">
@@ -584,7 +393,7 @@ export default function RunDetailPage() {
                                 )}
                             </div>
                         ) : (
-                            <div className="text-muted-foreground">No summary available.</div>
+                            <div className="text-muted-foreground">{t.run.summary.noSummary}</div>
                         )}
                     </div>
                 )}
@@ -592,9 +401,9 @@ export default function RunDetailPage() {
                 {/* Claims Tab with Clickable Citations */}
                 {run.status === "DONE" && activeTab === "claims" && summaryWithRefs?.summary && (
                     <div className="rounded-lg border bg-card p-6">
-                        <h3 className="text-lg font-semibold mb-4">Claims Draft</h3>
+                        <h3 className="text-lg font-semibold mb-4">{t.run.claims.title}</h3>
                         {!summaryWithRefs.summary.claims_draft || summaryWithRefs.summary.claims_draft.length === 0 ? (
-                            <div className="text-muted-foreground">No claims generated yet.</div>
+                            <div className="text-muted-foreground">{t.run.claims.noClaims}</div>
                         ) : (
                             <div className="space-y-4">
                                 {summaryWithRefs.summary.claims_draft.map((claim, i) => (
@@ -654,7 +463,7 @@ export default function RunDetailPage() {
                     <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-auto">
                         <div className="p-6 border-b flex items-center justify-between">
                             <h2 className="text-lg font-semibold">Paper Summary</h2>
-                            <button onClick={() => { setShowModal(false); setSelectedSummary(null); }} className="text-muted-foreground hover:text-foreground">✕</button>
+                            <button onClick={() => { setShowModal(false); }} className="text-muted-foreground hover:text-foreground">✕</button>
                         </div>
                         <div className="p-6">
                             {loadingSummary ? (
@@ -687,7 +496,7 @@ export default function RunDetailPage() {
                     <div className="bg-white h-full w-full max-w-lg shadow-xl overflow-auto">
                         <div className="p-6 border-b flex items-center justify-between sticky top-0 bg-white">
                             <h2 className="text-lg font-semibold">Evidence Detail</h2>
-                            <button onClick={() => { setShowEvidenceDrawer(false); setEvidenceDetail(null); }} className="text-muted-foreground hover:text-foreground">✕</button>
+                            <button onClick={() => { setShowEvidenceDrawer(false); }} className="text-muted-foreground hover:text-foreground">✕</button>
                         </div>
                         <div className="p-6">
                             {loadingEvidence ? (

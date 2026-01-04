@@ -141,6 +141,7 @@ async def upload_document(
     # Save file to disk
     try:
         storage_path = storage.save_file(
+            tenant_id=current_user.tenant_id,
             project_id=project.id,
             document_id=document.id,
             filename=file.filename,

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.deps import AdminUser, AnalystUser, AuthenticatedUser
@@ -16,45 +16,25 @@ from app.models.query_run import QueryRun, QueryStatus
 from app.services.audit import AuditActions, ResourceTypes, log_action
 from app.services.reports.pdf_report import build_run_report_pdf
 
+# Import schemas from dedicated module
+from app.schemas.runs import (
+    RunCreate,
+    RunResponse,
+    PaperResponse,
+    SummaryStatusResponse,
+    SummaryResponse,
+    EvidenceRowResponse,
+    RunSummaryResponse,
+    FormattedReference,
+    CitationWithIndex,
+    KeyPointWithIndices,
+    ClaimWithIndices,
+    SummaryWithIndices,
+    SummaryWithReferencesResponse,
+    EvidenceDetailResponse,
+)
+
 router = APIRouter(tags=["runs"])
-
-
-from datetime import datetime
-
-
-class RunCreate(BaseModel):
-    """Request body for creating a run."""
-
-    query_text: str = Field(..., min_length=1)
-    max_papers: int = Field(default=10, ge=1, le=50, description="Max papers to retrieve (1-50)")
-    year_from: int | None = Field(default=None, ge=1900, le=2026, description="Start year filter")
-    year_to: int | None = Field(default=None, ge=1900, le=2026, description="End year filter")
-    analysis_mode: str = Field(default="synthesis", pattern="^(synthesis|per_paper)$")
-    include_marketing: bool = Field(default=True)
-    language: str = Field(default="en", pattern="^(en|tr)$")
-
-    @model_validator(mode="after")
-    def validate_year_range(self):
-        if self.year_from and self.year_to and self.year_from > self.year_to:
-            raise ValueError("year_from must be <= year_to")
-        return self
-
-
-class RunResponse(BaseModel):
-    """Run response."""
-
-    id: str
-    project_id: str
-    query_text: str
-    status: str
-    error_message: str | None
-    created_at: str
-    max_papers: int
-    year_from: int | None
-    year_to: int | None
-    analysis_mode: str
-    include_marketing: bool
-    language: str
 
 
 def get_project_or_404(
@@ -84,14 +64,12 @@ def get_project_or_404(
 def create_run(
     project_id: UUID,
     request: RunCreate,
-    current_user: AnalystUser,  # ADMIN or ANALYST only
+    current_user: AnalystUser,
     db: Annotated[Session, Depends(get_db)],
 ) -> RunResponse:
     """Create a new query run and enqueue Celery task."""
-    # Verify project exists and belongs to tenant
     project = get_project_or_404(project_id, current_user.tenant_id, db)
 
-    # Create run with QUEUED status and search params
     run = QueryRun(
         project_id=project.id,
         query_text=request.query_text,
@@ -107,7 +85,6 @@ def create_run(
     db.commit()
     db.refresh(run)
 
-    # Audit log - run created
     log_action(
         db=db,
         tenant_id=current_user.tenant_id,
@@ -118,9 +95,7 @@ def create_run(
         metadata={"query_text": request.query_text[:100], "status": "QUEUED"},
     )
 
-    # Enqueue Celery task
     from app.celery_client import enqueue_run_pipeline
-
     enqueue_run_pipeline(str(run.id))
 
     return RunResponse(
@@ -146,14 +121,13 @@ def list_runs(
     db: Annotated[Session, Depends(get_db)],
 ) -> list[RunResponse]:
     """List all active (non-deleted) runs for a project."""
-    # Verify project exists and belongs to tenant
     project = get_project_or_404(project_id, current_user.tenant_id, db)
 
     runs = (
         db.query(QueryRun)
         .filter(
             QueryRun.project_id == project.id,
-            QueryRun.deleted_at.is_(None),  # Exclude deleted
+            QueryRun.deleted_at.is_(None),
         )
         .order_by(QueryRun.created_at.desc())
         .all()
@@ -191,7 +165,6 @@ def get_run(
             detail="Run not found",
         )
 
-    # Verify tenant ownership via project
     project = (
         db.query(Project)
         .filter(Project.id == run.project_id, Project.tenant_id == current_user.tenant_id)
@@ -219,21 +192,6 @@ def get_run(
     )
 
 
-class PaperResponse(BaseModel):
-    """Paper response."""
-
-    id: str
-    title: str
-    abstract: str | None
-    journal: str | None
-    year: int | None
-    authors: list[str]
-    pmid: str | None
-    doi: str | None
-    url: str | None
-    source: str
-
-
 @router.get("/runs/{run_id}/papers", response_model=list[PaperResponse])
 def get_run_papers(
     run_id: UUID,
@@ -251,7 +209,6 @@ def get_run_papers(
             detail="Run not found",
         )
 
-    # Verify tenant ownership via project
     project = (
         db.query(Project)
         .filter(Project.id == run.project_id, Project.tenant_id == current_user.tenant_id)
@@ -263,7 +220,6 @@ def get_run_papers(
             detail="Run not found",
         )
 
-    # Get papers via evidence
     papers = (
         db.query(Paper)
         .join(Evidence, Evidence.paper_id == Paper.id)
@@ -288,27 +244,6 @@ def get_run_papers(
     ]
 
 
-# Summary endpoints
-class SummaryStatusResponse(BaseModel):
-    """Summary status for a paper."""
-
-    paper_id: str
-    title: str
-    status: str
-    error_message: str | None = None
-
-
-class SummaryResponse(BaseModel):
-    """Full summary response."""
-
-    paper_id: str
-    run_id: str
-    status: str
-    model: str
-    summary: dict | None = None
-    error_message: str | None = None
-
-
 @router.get("/runs/{run_id}/summaries", response_model=list[SummaryStatusResponse])
 def get_run_summaries(
     run_id: UUID,
@@ -326,7 +261,6 @@ def get_run_summaries(
             detail="Run not found",
         )
 
-    # Verify tenant ownership
     project = (
         db.query(Project)
         .filter(Project.id == run.project_id, Project.tenant_id == current_user.tenant_id)
@@ -338,7 +272,6 @@ def get_run_summaries(
             detail="Run not found",
         )
 
-    # Get summaries with paper info
     summaries = (
         db.query(PaperSummary, Paper)
         .join(Paper, Paper.id == PaperSummary.paper_id)
@@ -350,7 +283,7 @@ def get_run_summaries(
         SummaryStatusResponse(
             paper_id=str(s.paper_id),
             title=p.title,
-            status=s.status,  # Already a string, not enum
+            status=s.status,
             error_message=s.error_message,
         )
         for s, p in summaries
@@ -366,9 +299,7 @@ def get_paper_summary(
 ) -> SummaryResponse:
     """Get summary for a specific paper in a run."""
     from app.models.paper_summary import PaperSummary
-    from app.models.paper import Paper
 
-    # Get summary
     summary = (
         db.query(PaperSummary)
         .filter(PaperSummary.paper_id == paper_id, PaperSummary.run_id == run_id)
@@ -381,7 +312,6 @@ def get_paper_summary(
             detail="Summary not found",
         )
 
-    # Verify tenant ownership
     if summary.tenant_id != current_user.tenant_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -391,36 +321,11 @@ def get_paper_summary(
     return SummaryResponse(
         paper_id=str(summary.paper_id),
         run_id=str(summary.run_id),
-        status=summary.status,  # Already a string
+        status=summary.status,
         model=summary.model,
         summary=summary.summary_json,
         error_message=summary.error_message,
     )
-
-
-# Evidence Table and Run Summary endpoints
-class EvidenceRowResponse(BaseModel):
-    """Evidence row response."""
-
-    paper_id: str
-    citation: dict
-    study_type: str | None
-    population: str | None
-    intervention: str | None
-    comparator: str | None
-    outcomes: list[str]
-    key_findings: list[str]
-    limitations: list[str]
-
-
-class RunSummaryResponse(BaseModel):
-    """Run synthesis summary response."""
-
-    run_id: str
-    status: str
-    model: str
-    summary: dict | None = None
-    error_message: str | None = None
 
 
 @router.get("/runs/{run_id}/evidence-table", response_model=list[EvidenceRowResponse])
@@ -439,7 +344,6 @@ def get_evidence_table(
             detail="Run not found",
         )
 
-    # Verify tenant ownership
     project = (
         db.query(Project)
         .filter(Project.id == run.project_id, Project.tenant_id == current_user.tenant_id)
@@ -485,7 +389,6 @@ def get_run_summary(
             detail="Run not found",
         )
 
-    # Verify tenant ownership
     project = (
         db.query(Project)
         .filter(Project.id == run.project_id, Project.tenant_id == current_user.tenant_id)
@@ -524,8 +427,6 @@ def retry_run_summary(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """Retry failed run synthesis (admin only)."""
-    from app.models.run_summary import RunSummary
-
     if current_user.role != "ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -539,7 +440,6 @@ def retry_run_summary(
             detail="Run not found",
         )
 
-    # Verify tenant ownership
     project = (
         db.query(Project)
         .filter(Project.id == run.project_id, Project.tenant_id == current_user.tenant_id)
@@ -551,73 +451,16 @@ def retry_run_summary(
             detail="Run not found",
         )
 
-    from app.core.celery import celery_app
-
-    # Trigger synthesis retry
+    from app.celery_client import celery_app
     celery_app.send_task("app.tasks.build_evidence_table", args=[str(run_id)])
 
     return {"message": "Retry triggered", "run_id": str(run_id)}
-
-
-# Citation resolver and reference endpoints
-class FormattedReference(BaseModel):
-    """Formatted reference with index."""
-
-    index: int
-    paper_id: str
-    formatted: str
-    link: str | None
-
-
-class CitationWithIndex(BaseModel):
-    """Citation with numeric index."""
-
-    index: int
-
-
-class KeyPointWithIndices(BaseModel):
-    """Key point with numeric citation indices."""
-
-    text: str
-    citations: list[CitationWithIndex]
-
-
-class ClaimWithIndices(BaseModel):
-    """Claim with numeric citation indices."""
-
-    claim: str
-    allowed: bool
-    rationale: str
-    citations: list[CitationWithIndex]
-
-
-class SummaryWithIndices(BaseModel):
-    """Summary with numeric citations."""
-
-    tldr: str
-    key_points: list[KeyPointWithIndices]
-    consensus_level: str
-    contradictions: list[KeyPointWithIndices]
-    gaps: list[str]
-    safety_notes: list[str]
-    claims_draft: list[ClaimWithIndices]
-
-
-class SummaryWithReferencesResponse(BaseModel):
-    """Summary with numbered references."""
-
-    run_id: str
-    status: str
-    summary: SummaryWithIndices | None
-    references: list[FormattedReference]
-    error_message: str | None = None
 
 
 def _format_reference(paper, index: int) -> FormattedReference:
     """Format a paper as a reference string."""
     parts = []
 
-    # Authors
     authors = paper.authors or []
     if authors:
         if len(authors) == 1:
@@ -627,15 +470,12 @@ def _format_reference(paper, index: int) -> FormattedReference:
         else:
             parts.append(f"{authors[0]} et al.")
 
-    # Year
     if paper.year:
         parts.append(f"({paper.year})")
 
-    # Journal
     if paper.journal:
         parts.append(paper.journal)
 
-    # IDs
     ids = []
     if paper.pmid:
         ids.append(f"PMID:{paper.pmid}")
@@ -646,7 +486,6 @@ def _format_reference(paper, index: int) -> FormattedReference:
     if ids:
         formatted += " — " + ", ".join(ids)
 
-    # Link
     link = None
     if paper.pmid:
         link = f"https://pubmed.ncbi.nlm.nih.gov/{paper.pmid}/"
@@ -698,7 +537,6 @@ def get_summary_with_references(
 
     summary_data = summary.summary_json
 
-    # Collect all paper_ids from citations in appearance order
     cited_paper_ids: list[str] = []
     seen_ids: set[str] = set()
 
@@ -714,7 +552,6 @@ def get_summary_with_references(
     collect_citations(summary_data.get("contradictions", []))
     collect_citations(summary_data.get("claims_draft", []))
 
-    # Fetch papers and build index map
     papers = {}
     if cited_paper_ids:
         paper_records = (
@@ -724,7 +561,6 @@ def get_summary_with_references(
         )
         papers = {str(p.id): p for p in paper_records}
 
-    # Sort by year desc for tie-breaking, but appearance order primary
     paper_id_to_index: dict[str, int] = {}
     references: list[FormattedReference] = []
     for i, pid in enumerate(cited_paper_ids, 1):
@@ -735,7 +571,6 @@ def get_summary_with_references(
         else:
             references.append(FormattedReference(index=i, paper_id=pid, formatted=f"[Paper {pid[:8]}]", link=None))
 
-    # Convert citations to indices
     def convert_citations(items: list[dict]) -> list[KeyPointWithIndices]:
         result = []
         for item in items:
@@ -782,22 +617,6 @@ def get_summary_with_references(
     )
 
 
-class EvidenceDetailResponse(BaseModel):
-    """Detailed evidence for a paper."""
-
-    paper_id: str
-    title: str
-    authors: list[str]
-    year: int | None
-    journal: str | None
-    pmid: str | None
-    doi: str | None
-    url: str | None
-    evidence_snippets: list[str]
-    key_findings: list[str]
-    study_type: str | None
-
-
 @router.get("/runs/{run_id}/evidence/{paper_id}", response_model=EvidenceDetailResponse)
 def get_evidence_detail(
     run_id: UUID,
@@ -821,12 +640,10 @@ def get_evidence_detail(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
 
-    # Get paper (tenant safety is ensured by project ownership above)
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
     if not paper:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
 
-    # Get evidence row
     evidence_row = (
         db.query(EvidenceRow)
         .filter(EvidenceRow.run_id == run_id, EvidenceRow.paper_id == paper_id)
@@ -839,7 +656,6 @@ def get_evidence_detail(
 
     if evidence_row and evidence_row.row_json:
         raw_snippets = evidence_row.row_json.get("evidence_snippets", [])
-        # Extract quote strings from snippet dicts
         for snippet in raw_snippets:
             if isinstance(snippet, dict):
                 evidence_snippets.append(snippet.get("quote", ""))
@@ -869,25 +685,14 @@ def get_run_report_pdf(
     current_user: AuthenticatedUser,
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
-    """Generate and download PDF report for a run.
-    
-    Returns a PDF file containing:
-    - Cover page with run info
-    - Run metadata (project, query, dates, params)
-    - Executive summary (synthesis)
-    - Key points with citations
-    - Evidence table
-    - References list
-    """
-    # Verify run exists and user has access
+    """Generate and download PDF report for a run."""
     run = db.query(QueryRun).filter(QueryRun.id == run_id).first()
     if not run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
-    # Verify project access (tenant safety)
+
     project = db.query(Project).filter(
         Project.id == run.project_id,
         Project.tenant_id == current_user.tenant_id,
@@ -897,7 +702,7 @@ def get_run_report_pdf(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
+
     try:
         pdf_bytes = build_run_report_pdf(run_id, db)
     except ValueError as e:
@@ -906,16 +711,15 @@ def get_run_report_pdf(
             detail=str(e),
         )
     except Exception as e:
-        # Log error and return 500
         import logging
         logging.error(f"PDF generation failed for run {run_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate PDF report",
         )
-    
+
     filename = f"pharmainsightai-run-{run_id}.pdf"
-    
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -928,7 +732,7 @@ def get_run_report_pdf(
 @router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_run(
     run_id: UUID,
-    current_user: AdminUser,  # ADMIN only
+    current_user: AdminUser,
     db: Annotated[Session, Depends(get_db)],
 ) -> None:
     """Soft-delete a run."""
@@ -936,31 +740,28 @@ def delete_run(
         QueryRun.id == run_id,
         QueryRun.deleted_at.is_(None),
     ).first()
-    
+
     if not run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
-    # Verify tenant ownership via project
+
     project = db.query(Project).filter(
         Project.id == run.project_id,
         Project.tenant_id == current_user.tenant_id,
     ).first()
-    
+
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
-    # Soft-delete
+
     run.deleted_at = datetime.now(timezone.utc)
     run.deleted_by = current_user.user_id
     db.commit()
 
-    # Audit log
     log_action(
         db=db,
         tenant_id=current_user.tenant_id,
@@ -975,43 +776,40 @@ def delete_run(
 @router.post("/runs/{run_id}/restore", response_model=RunResponse)
 def restore_run(
     run_id: UUID,
-    current_user: AdminUser,  # ADMIN only
+    current_user: AdminUser,
     db: Annotated[Session, Depends(get_db)],
 ) -> RunResponse:
     """Restore a soft-deleted run."""
     run = db.query(QueryRun).filter(QueryRun.id == run_id).first()
-    
+
     if not run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
-    # Verify tenant ownership via project
+
     project = db.query(Project).filter(
         Project.id == run.project_id,
         Project.tenant_id == current_user.tenant_id,
     ).first()
-    
+
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Run not found",
         )
-    
+
     if run.deleted_at is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Run is not deleted",
         )
-    
-    # Restore
+
     run.deleted_at = None
     run.deleted_by = None
     db.commit()
     db.refresh(run)
 
-    # Audit log
     log_action(
         db=db,
         tenant_id=current_user.tenant_id,
@@ -1032,4 +830,7 @@ def restore_run(
         max_papers=run.max_papers,
         year_from=run.year_from,
         year_to=run.year_to,
+        analysis_mode=run.analysis_mode,
+        include_marketing=run.include_marketing,
+        language=run.language,
     )
